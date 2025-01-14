@@ -114,33 +114,55 @@ def draw_connections(frame, keypoints, edges, confidence_threshold):
         y2, x2, c2 = shaped[p2]
         if (c1 > confidence_threshold) & (c2 > confidence_threshold):      
             cv2.line(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 4)
+def draw_labels(frame, person, confidence_threshold, person_id):
+    y, x, _ = frame.shape
+    shaped = np.squeeze(np.multiply(person, [y, x, 1]))
+    keypoint = shaped[0]
+    ky, kx, kp_conf = keypoint
+    if kp_conf > confidence_threshold:
+        label = f"Person {person_id}"
+        cv2.putText(frame, label, (int(kx) - 30, int(ky) - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2, cv2.LINE_AA)
+        
+prev_pose = None
+pose_play = False
 
 # ฟังก์ชันวนลูปตรวจจับทุกคนในเฟรม
 def loop_through_people(frame, keypoints_with_scores, edges, confidence_threshold):
+    global prev_pose, pose_play
     frame_height, frame_width, _ = frame.shape
     num_zones = 4  # จำนวนโซนที่จะแบ่ง
-    
-    for person in keypoints_with_scores:
+
+    for person_id, person in enumerate(keypoints_with_scores):
         draw_connections(frame, person, edges, confidence_threshold)
         draw_keypoints(frame, person, confidence_threshold)
+        draw_labels(frame, person, confidence_threshold, person_id + 1)
 
         # กำหนดโซนให้คนแต่ละคน
         zone = assign_zone_to_person(person, frame_width, num_zones)
 
-        # ตรวจจับท่าทางและเล่นเสียงเมื่อพบ
-        pose = is_pose_detected(person, confidence_threshold)
-        if zone != -1:  # ตรวจสอบว่าโซนถูกต้อง
-            if pose == "left_hand_up":
-                play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/DI_Dead Kick_Press_0115.6.wav', zone)
-            elif pose == "right_hand_up":
-                play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/DI_HiHat_Foot_1144.4.wav', zone)
-            elif pose == "standing":
-                play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/Overhead Sample 4.wav', zone)
-            elif pose == "sit":
-                play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/Snare Sample 27.wav', zone)
-            elif pose == "both_hands_knee":
-                play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/Tom Sample 17.wav', zone)
+        # ตรวจจับท่าทาง
+        current_pose = is_pose_detected(person, confidence_threshold)
+        
+        if current_pose:
+            if current_pose != prev_pose:
+                pose_play = False  # รีเซ็ตการเล่นเสียงเมื่อท่าทางเปลี่ยน
+                prev_pose = current_pose
 
+            if not pose_play:
+                pose_play = True  # กำหนดให้เล่นเสียงแค่ครั้งเดียว
+                # ตรวจจับท่าทางและเล่นเสียงเมื่อพบ
+                if zone != -1:  # ตรวจสอบว่าโซนถูกต้อง
+                    if current_pose == "left_hand_up":
+                        play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/DI_Dead Kick_Press_0115.6.wav', zone)  # ท่าการยกมือซ้าย
+                    elif current_pose == "right_hand_up":
+                        play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/DI_HiHat_Foot_1144.4.wav', zone)  # ท่าการยกมือขวา
+                    elif current_pose == "both_hands_up":
+                        play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/Overhead Sample 4.wav', zone)  # ท่ายืนตรง
+                    elif current_pose == "sit":
+                        play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/Snare Sample 27.wav', zone)  # ท่านั่ง
+                    elif current_pose == "both_hands_knee":
+                        play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/Tom Sample 17.wav', zone)  # ท่ามือทั้งสองข้างแตะเข่าทั้งสองข้าง
 # วาดเส้นแบ่งโซน
 def draw_zones(frame, num_zones=4):
     """วาดเส้นแบ่งโซนในเฟรม"""
