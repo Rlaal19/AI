@@ -11,12 +11,20 @@ movenet = model.signatures['serving_default']
 
 # เริ่มต้น pygame mixer และกำหนดจำนวน Channel
 pygame.mixer.init()
-pygame.mixer.set_num_channels(5)  # จำกัดจำนวน Channels สูงสุดให้ 5
+pygame.mixer.set_num_channels(4)  # จำกัดจำนวน Channels สูงสุดให้ตรงกับจำนวนช่อง
+
+EDGES = {
+    (0, 1): 'm', (0, 2): 'm', (1, 3): 'm', (2, 4): 'm',
+    (0, 5): 'm', (0, 6): 'm', (5, 7): 'm', (7, 9): 'm',
+    (6, 8): 'm', (8, 10): 'm', (5, 6): 'm', (5, 11): 'm',
+    (6, 12): 'm', (11, 13): 'm', (13, 15): 'm', (12, 14): 'm',
+    (14, 16): 'm'
+}
 
 # ฟังก์ชันเล่นเสียงใน Channel ที่กำหนด
 def play_sound_limited_with_channel(file, channel_id):
-    """เล่นเสียงใน Channel ที่กำหนดตาม ID ของคน"""
-    max_channels = 5  # กำหนดจำนวน Channel สูงสุด
+    """เล่นเสียงใน Channel ที่กำหนดตาม ID ของโซน"""
+    max_channels = 4  # กำหนดจำนวน Channel สูงสุด
     channel_id %= max_channels  # จำกัด ID ไม่ให้เกินจำนวน Channel
     channel = pygame.mixer.Channel(channel_id)
     if not channel.get_busy():  # ถ้า Channel ว่าง
@@ -78,6 +86,15 @@ def is_pose_detected(keypoints, confidence_threshold):
 
     return None
 
+# ฟังก์ชันแบ่งโซนในเฟรม
+def assign_zone_to_person(person_keypoints, frame_width, num_zones=4):
+    """แบ่งโซนให้แต่ละคนตามพิกัดกลางลำตัว (hip)"""
+    hip_x = person_keypoints[11][1]  # พิกัด x ของสะโพก
+    if hip_x > 0:
+        zone_width = frame_width / num_zones
+        return int(hip_x * frame_width // zone_width)  # คำนวณโซนที่อยู่
+    return -1  # กรณีไม่พบสะโพก (keypoints ไม่ชัดเจน)
+
 # ฟังก์ชันวาด Keypoints
 def draw_keypoints(frame, keypoints, confidence_threshold):
     y, x, _ = frame.shape
@@ -86,15 +103,6 @@ def draw_keypoints(frame, keypoints, confidence_threshold):
         ky, kx, kp_conf = kp
         if kp_conf > confidence_threshold:
             cv2.circle(frame, (int(kx), int(ky)), 6, (0, 255, 0), -1)
-
-# Dictionary สำหรับกำหนดเส้นเชื่อมต่อ
-EDGES = {
-    (0, 1): 'm', (0, 2): 'c', (1, 3): 'm', (2, 4): 'c',
-    (0, 5): 'm', (0, 6): 'c', (5, 7): 'm', (7, 9): 'm',
-    (6, 8): 'c', (8, 10): 'c', (5, 6): 'y', (5, 11): 'm',
-    (6, 12): 'c', (11, 12): 'y', (11, 13): 'm', (13, 15): 'm',
-    (12, 14): 'c', (14, 16): 'c'
-}
 
 # ฟังก์ชันวาด Connections
 def draw_connections(frame, keypoints, edges, confidence_threshold):
@@ -109,25 +117,38 @@ def draw_connections(frame, keypoints, edges, confidence_threshold):
 
 # ฟังก์ชันวนลูปตรวจจับทุกคนในเฟรม
 def loop_through_people(frame, keypoints_with_scores, edges, confidence_threshold):
-    person_id = 0  # ใช้ตัวระบุ ID ของคนในเฟรม
+    frame_height, frame_width, _ = frame.shape
+    num_zones = 4  # จำนวนโซนที่จะแบ่ง
+    
     for person in keypoints_with_scores:
         draw_connections(frame, person, edges, confidence_threshold)
         draw_keypoints(frame, person, confidence_threshold)
 
+        # กำหนดโซนให้คนแต่ละคน
+        zone = assign_zone_to_person(person, frame_width, num_zones)
+
         # ตรวจจับท่าทางและเล่นเสียงเมื่อพบ
         pose = is_pose_detected(person, confidence_threshold)
-        if pose == "left_hand_up":
-            play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/DI_Dead Kick_Press_0115.6.wav', person_id)
-        elif pose == "right_hand_up":
-            play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/DI_HiHat_Foot_1144.4.wav', person_id)
-        elif pose == "standing":
-            play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/Overhead Sample 4.wav', person_id)
-        elif pose == "sit":
-            play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/Snare Sample 27.wav', person_id)
-        elif pose == "both_hands_knee":
-            play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/Tom Sample 17.wav', person_id)
+        if zone != -1:  # ตรวจสอบว่าโซนถูกต้อง
+            if pose == "left_hand_up":
+                play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/DI_Dead Kick_Press_0115.6.wav', zone)
+            elif pose == "right_hand_up":
+                play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/DI_HiHat_Foot_1144.4.wav', zone)
+            elif pose == "standing":
+                play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/Overhead Sample 4.wav', zone)
+            elif pose == "sit":
+                play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/Snare Sample 27.wav', zone)
+            elif pose == "both_hands_knee":
+                play_sound_limited_with_channel('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/Tom Sample 17.wav', zone)
 
-        person_id += 1  # เพิ่ม ID สำหรับคนถัดไป
+# วาดเส้นแบ่งโซน
+def draw_zones(frame, num_zones=4):
+    """วาดเส้นแบ่งโซนในเฟรม"""
+    frame_height, frame_width, _ = frame.shape
+    zone_width = frame_width // num_zones
+    for i in range(1, num_zones):
+        x = i * zone_width
+        cv2.line(frame, (x, 0), (x, frame_height), (255, 255, 255), 2)
 
 # เริ่มต้น Webcam
 cap = cv2.VideoCapture(0)
@@ -144,6 +165,9 @@ while cap.isOpened():
     # ตรวจจับ keypoints
     results = movenet(input_img)
     keypoints_with_scores = results['output_0'].numpy()[:, :, :51].reshape((6, 17, 3))
+
+    # วาดเส้นแบ่งโซน
+    draw_zones(frame, num_zones=4)
 
     # วาดผลลัพธ์ลงบน frame
     loop_through_people(frame, keypoints_with_scores, EDGES, confidence_threshold=0.3)
