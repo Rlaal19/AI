@@ -4,7 +4,7 @@ import mediapipe as mp
 import math
 import pygame
 
-# Initialize Mediapipe Holistic and Hands
+# Initialize Mediapipe Holistic
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
@@ -16,17 +16,19 @@ sounds = {
     "right": pygame.mixer.Sound('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/DI_HiHat_Foot_1144.4.wav'),
     "head": pygame.mixer.Sound('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/Overhead Sample 4.wav'),
     "chest": pygame.mixer.Sound('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/Snare Sample 27.wav'),
-    "hip": pygame.mixer.Sound('/Users/parichaya23icloud.com/Desktop/AI/overall_V2/used_sound_file/Tom Sample 17.wav'),
 }
 
-# Initialize up to 3 cameras
-camera_indices = [0, 1, 2]
-caps = [cv2.VideoCapture(i) for i in camera_indices if cv2.VideoCapture(i).isOpened()]
-
-# Check if cameras opened successfully
+# Initialize cameras
+camera_indices = [0, 1, 2]  # Indices for up to 3 cameras
+caps = [cv2.VideoCapture(idx) for idx in camera_indices if cv2.VideoCapture(idx).isOpened()]
 if not caps:
     print("Error: No cameras available.")
     exit()
+
+for cap in caps:
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cap.set(cv2.CAP_PROP_FPS, 30)
 
 # Function to calculate the Euclidean distance between two points
 def calculate_distance(point1, point2):
@@ -39,7 +41,18 @@ def calculate_dynamic_radius(shoulder_distance):
     scaling_factor = shoulder_distance / base_distance
     return int(base_radius * scaling_factor)
 
-# Hand landmark indices for fingertips
+# Function to check if the activation pose is detected
+def is_activation_pose_detected(results):
+    if not results.pose_landmarks:
+        return False
+
+    left_wrist = results.pose_landmarks.landmark[mp_holistic.PoseLandmark.LEFT_WRIST]
+    right_wrist = results.pose_landmarks.landmark[mp_holistic.PoseLandmark.RIGHT_WRIST]
+    left_shoulder = results.pose_landmarks.landmark[mp_holistic.PoseLandmark.LEFT_SHOULDER]
+    right_shoulder = results.pose_landmarks.landmark[mp_holistic.PoseLandmark.RIGHT_SHOULDER]
+
+    return (left_wrist.y < left_shoulder.y) and (right_wrist.y < right_shoulder.y)
+
 fingertip_indices = [
     mp_hands.HandLandmark.THUMB_TIP,
     mp_hands.HandLandmark.INDEX_FINGER_TIP,
@@ -48,102 +61,126 @@ fingertip_indices = [
     mp_hands.HandLandmark.PINKY_TIP,
 ]
 
-# State trackers for each player
-players = [{} for _ in caps]
+program_active = False
+current_hitbox = None
+finger_inside_hitbox = False
 
 with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic, \
      mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5) as hands:
-    
-    print("\nPress 'q' to quit.")
+
     while True:
-        for idx, cap in enumerate(caps):
+        frames = []
+        overlays = []
+        
+        for cap in caps:
             ret, frame = cap.read()
             if not ret:
-                print(f"Error: Camera {idx} failed to provide a frame.")
+                print("Error: Could not read frame.")
                 continue
-
-            # Flip the frame horizontally for a natural mirror effect
             frame = cv2.flip(frame, 1)
+            frames.append(frame)
 
-            # Convert the frame to RGB for Mediapipe
+        if not frames:
+            break
+
+        combined_frame = np.zeros_like(frames[0])
+        for frame in frames:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-            # Process the frame with Mediapipe Holistic
             results = holistic.process(rgb_frame)
             hand_results = hands.process(rgb_frame)
-
-            # Overlay initialization
             overlay = frame.copy()
 
-            if results.pose_landmarks:
-                mp_drawing.draw_landmarks(frame, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS)
+            if is_activation_pose_detected(results):
+                program_active = not program_active
+                print("Program activated!" if program_active else "Program deactivated!")
+                cv2.waitKey(500)
 
-                # Get key body positions
-                left_shoulder = results.pose_landmarks.landmark[mp_holistic.PoseLandmark.LEFT_SHOULDER]
-                right_shoulder = results.pose_landmarks.landmark[mp_holistic.PoseLandmark.RIGHT_SHOULDER]
-                head = results.pose_landmarks.landmark[mp_holistic.PoseLandmark.NOSE]
-                left_hip = results.pose_landmarks.landmark[mp_holistic.PoseLandmark.LEFT_HIP]
-                right_hip = results.pose_landmarks.landmark[mp_holistic.PoseLandmark.RIGHT_HIP]
+            if program_active:
+                if results.pose_landmarks:
+                    mp_drawing.draw_landmarks(frame, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS)
 
-                # Calculate key coordinates and dynamic radius
-                left_shoulder_x, left_shoulder_y = int(left_shoulder.x * frame.shape[1]), int((left_shoulder.y - 0.3) * frame.shape[0])
-                right_shoulder_x, right_shoulder_y = int(right_shoulder.x * frame.shape[1]), int((right_shoulder.y - 0.3) * frame.shape[0])
-                head_x, head_y = int(head.x * frame.shape[1]), int((head.y - 0.5) * frame.shape[0])
-                chest_x, chest_y = int((left_shoulder.x + right_shoulder.x) / 2 * frame.shape[1]), int((left_shoulder.y + right_shoulder.y + 0.3) / 2 * frame.shape[0])
-                hip_x, hip_y = int((left_hip.x + right_hip.x) / 2 * frame.shape[1]), int(((left_hip.y + right_hip.y) / 2 - 0.1) * frame.shape[0])
+                    left_shoulder = results.pose_landmarks.landmark[mp_holistic.PoseLandmark.LEFT_SHOULDER]
+                    right_shoulder = results.pose_landmarks.landmark[mp_holistic.PoseLandmark.RIGHT_SHOULDER]
+                    left_shoulder_x = int(left_shoulder.x * frame.shape[1])
+                    left_shoulder_y = int((left_shoulder.y - 0.1) * frame.shape[0])
+                    right_shoulder_x = int(right_shoulder.x * frame.shape[1])
+                    right_shoulder_y = int((right_shoulder.y - 0.1) * frame.shape[0])
 
-                shoulder_distance = calculate_distance(
-                    (left_shoulder.x, left_shoulder.y), (right_shoulder.x, right_shoulder.y)
-                )
-                radius = calculate_dynamic_radius(shoulder_distance)
+                    shoulder_distance = calculate_distance(
+                        (left_shoulder.x, left_shoulder.y),
+                        (right_shoulder.x, right_shoulder.y)
+                    )
+                    radius = calculate_dynamic_radius(shoulder_distance)
+                    alpha = 0.4
 
-                # Default colors
-                colors = {
-                    "left": (0, 255, 0),
-                    "right": (0, 255, 0),
-                    "head": (0, 255, 0),
-                    "chest": (0, 255, 0),
-                    "hip": (0, 255, 0),
-                }
+                    head = results.pose_landmarks.landmark[mp_holistic.PoseLandmark.NOSE]
+                    head_x = int(head.x * frame.shape[1])
+                    head_y = int((head.y - 0.2) * frame.shape[0])
+                    chest_x = int((left_shoulder.x + right_shoulder.x) / 2 * frame.shape[1])
+                    chest_y = int((left_shoulder.y + right_shoulder.y + 0.3) / 2 * frame.shape[0])
 
-                # Detect touch with hands
-                if hand_results.multi_hand_landmarks:
-                    for hand_landmarks in hand_results.multi_hand_landmarks:
-                        for idx in fingertip_indices:
-                            fingertip = hand_landmarks.landmark[idx]
-                            fingertip_x, fingertip_y = int(fingertip.x * frame.shape[1]), int(fingertip.y * frame.shape[0])
+                    left_color = (0, 255, 0)
+                    right_color = (0, 255, 0)
+                    head_color = (0, 255, 0)
+                    chest_color = (0, 255, 0)
 
-                            # Check collisions and update colors
-                            for part, (x, y) in [("left", (left_shoulder_x, left_shoulder_y)),
-                                                 ("right", (right_shoulder_x, right_shoulder_y)),
-                                                 ("head", (head_x, head_y)),
-                                                 ("chest", (chest_x, chest_y)),
-                                                 ("hip", (hip_x, hip_y))]:
-                                if calculate_distance((fingertip_x, fingertip_y), (x, y)) < radius:
-                                    colors[part] = (0, 0, 255)
-                                    if sounds[part]:
-                                        sounds[part].play()
+                    new_hitbox = None
+                    finger_detected = False
 
-                # Draw translucent hitboxes
-                for part, (x, y) in [("left", (left_shoulder_x, left_shoulder_y)),
-                                     ("right", (right_shoulder_x, right_shoulder_y)),
-                                     ("head", (head_x, head_y)),
-                                     ("chest", (chest_x, chest_y)),
-                                     ("hip", (hip_x, hip_y))]:
-                    cv2.circle(overlay, (x, y), radius, colors[part], -1)
-                    cv2.putText(frame, f"{part} sound", (x - radius, y - radius - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                    if hand_results.multi_hand_landmarks:
+                        for hand_landmarks in hand_results.multi_hand_landmarks:
+                            for idx in fingertip_indices:
+                                fingertip = hand_landmarks.landmark[idx]
+                                fingertip_x = int(fingertip.x * frame.shape[1])
+                                fingertip_y = int(fingertip.y * frame.shape[0])
 
-                cv2.addWeighted(overlay, 0.4, frame, 0.6, 0)
+                                if calculate_distance((fingertip_x, fingertip_y), (left_shoulder_x, left_shoulder_y)) < radius:
+                                    left_color = (0, 0, 255)
+                                    new_hitbox = "left"
+                                    finger_detected = True
+                                if calculate_distance((fingertip_x, fingertip_y), (right_shoulder_x, right_shoulder_y)) < radius:
+                                    right_color = (0, 0, 255)
+                                    new_hitbox = "right"
+                                    finger_detected = True
+                                if calculate_distance((fingertip_x, fingertip_y), (head_x, head_y)) < radius:
+                                    head_color = (0, 0, 255)
+                                    new_hitbox = "head"
+                                    finger_detected = True
+                                if calculate_distance((fingertip_x, fingertip_y), (chest_x, chest_y)) < radius:
+                                    chest_color = (0, 0, 255)
+                                    new_hitbox = "chest"
+                                    finger_detected = True
 
-            # Display the frame for the current camera
-            cv2.imshow(f"Player {idx + 1} - Camera", frame)
+                    if finger_detected:
+                        if new_hitbox != current_hitbox or not finger_inside_hitbox:
+                            if new_hitbox in sounds:
+                                sounds[new_hitbox].play()
+                        finger_inside_hitbox = True
+                    else:
+                        finger_inside_hitbox = False
 
-        # Break the loop when 'q' is pressed
+                    current_hitbox = new_hitbox
+
+                    cv2.circle(overlay, (left_shoulder_x, left_shoulder_y), radius, left_color, -1)
+                    cv2.circle(overlay, (right_shoulder_x, right_shoulder_y), radius, right_color, -1)
+                    cv2.circle(overlay, (head_x, head_y), radius, head_color, -1)
+                    cv2.circle(overlay, (chest_x, chest_y), radius, chest_color, -1)
+
+                    cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+
+            activation_status = "Active" if program_active else "Inactive"
+            status_color = (0, 255, 0) if program_active else (0, 0, 255)
+            cv2.putText(frame, f"Program: {activation_status}", (10, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, status_color, 2, cv2.LINE_AA)
+
+            combined_frame = cv2.addWeighted(combined_frame, 0.5, frame, 0.5, 0)
+
+        cv2.imshow('Pose-based Sound Player (Multi-Camera)', combined_frame)
+
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-# Release all cameras and close all windows
 for cap in caps:
     cap.release()
 cv2.destroyAllWindows()
